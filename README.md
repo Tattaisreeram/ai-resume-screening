@@ -5,7 +5,7 @@ An **AI-powered resume screening web application** built with **Streamlit**, lev
 
 <p align="center">
   <a href="https://ai-resume-screening-g83kj4zxee627rfhrbapox.streamlit.app/" target="_blank">
-    <img src="https://img.shields.io/badge/🚀_Live%20App-Streamlit-brightgreen?style=for-the-badge" alt="Streamlit App">
+    
   </a>
 </p>
 <p align="center">
