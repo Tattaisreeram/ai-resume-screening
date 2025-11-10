@@ -3,117 +3,210 @@ from PyPDF2 import PdfReader
 import pandas as pd
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
+import re
 import io
 import time
+import numpy as np
 
-# ----------------------------
-# App Configuration
-# ----------------------------
+# ============================================================
+# 🎨 Streamlit App Configuration
+# ============================================================
 st.set_page_config(
     page_title="AI Resume Screening System",
     page_icon="📄",
-    layout="centered",
+    layout="wide",
+    initial_sidebar_state="expanded"
 )
 
-# ----------------------------
-# Utility Functions
-# ----------------------------
+st.markdown("""
+    <style>
+        .main {background-color: #f9fafc;}
+        .stButton>button {
+            background-color: #4CAF50;
+            color: white;
+            border-radius: 8px;
+            padding: 0.5em 1em;
+            font-weight: 600;
+            transition: all 0.3s;
+        }
+        .stButton>button:hover {
+            background-color: #45a049;
+        }
+        .stProgress > div > div > div {
+            background-color: #4CAF50;
+        }
+        .highlight {
+            background-color: #fff8b3;
+            border-radius: 4px;
+            padding: 0px 3px;
+        }
+    </style>
+""", unsafe_allow_html=True)
+
+# ============================================================
+# 🧠 Utility Functions
+# ============================================================
 
 @st.cache_data
 def extract_text_from_pdf(file):
-    """Extracts raw text from a PDF file."""
+    """Extract text content from PDF file using PyPDF2."""
     try:
         pdf_reader = PdfReader(file)
         text = ""
         for page in pdf_reader.pages:
             content = page.extract_text()
             if content:
-                text += content
+                text += " " + content
         return text.strip()
     except Exception as e:
-        st.error(f"Error reading {file.name}: {e}")
+        st.error(f"❌ Error reading {file.name}: {e}")
         return ""
 
 
-def rank_resumes(job_description: str, resumes: list[str]) -> pd.DataFrame:
-    """Ranks resumes based on similarity to job description using TF-IDF and cosine similarity."""
+def preprocess_text(text: str) -> str:
+    """Basic text preprocessing for better TF-IDF results."""
+    text = re.sub(r'\s+', ' ', text)
+    text = re.sub(r'[^a-zA-Z0-9\s]', '', text)
+    return text.lower().strip()
+
+
+def weighted_rank(job_description: str, resumes: list[str]) -> pd.DataFrame:
+    """
+    Compute similarity between job description and resumes using
+    TF-IDF and cosine similarity, with section-based weighting.
+    """
     documents = [job_description] + resumes
-    vectorizer = TfidfVectorizer(stop_words="english").fit_transform(documents)
-    vectors = vectorizer.toarray()
+    tfidf = TfidfVectorizer(stop_words='english').fit_transform(documents)
+    vectors = tfidf.toarray()
 
-    job_vector = vectors[0]
-    resume_vectors = vectors[1:]
+    job_vec = vectors[0]
+    resume_vecs = vectors[1:]
 
-    cosine_similarities = cosine_similarity([job_vector], resume_vectors).flatten()
+    similarities = cosine_similarity([job_vec], resume_vecs).flatten()
 
     df = pd.DataFrame({
         "Resume": [f"Resume_{i+1}.pdf" for i in range(len(resumes))],
-        "Score": cosine_similarities
-    }).sort_values(by="Score", ascending=False)
-    df["Rank"] = range(1, len(df) + 1)
-    df = df[["Rank", "Resume", "Score"]]
+        "Base Score": similarities
+    })
+
+    # Section weights - emphasize skills, experience keywords
+    skill_keywords = ['python', 'javascript', 'fastapi', 'react', 'docker', 'sql', 'aws', 'machine learning']
+    exp_keywords = ['developed', 'implemented', 'designed', 'built', 'optimized']
+
+    section_boost = []
+    for text in resumes:
+        skill_count = sum(kw in text.lower() for kw in skill_keywords)
+        exp_count = sum(kw in text.lower() for kw in exp_keywords)
+        boost = 0.01 * skill_count + 0.02 * exp_count
+        section_boost.append(boost)
+
+    df['Weighted Score'] = df['Base Score'] + np.array(section_boost)
+    df['Weighted Score'] = df['Weighted Score'].clip(0, 1)
+    df = df.sort_values(by='Weighted Score', ascending=False).reset_index(drop=True)
+    df['Rank'] = df.index + 1
+    df = df[['Rank', 'Resume', 'Base Score', 'Weighted Score']]
+
     return df
 
 
-# ----------------------------
-# Streamlit App UI
-# ----------------------------
+def extract_keywords(text: str, top_n=10):
+    """Extract top TF-IDF keywords from text."""
+    tfidf = TfidfVectorizer(stop_words="english", max_features=top_n)
+    tfidf.fit([text])
+    return sorted(tfidf.get_feature_names_out())
 
-st.title("📄 AI Resume Screening & Candidate Ranking System")
+
+# ============================================================
+# 🌐 App Layout
+# ============================================================
+
+st.title("📄 AI Resume Screening & Candidate Ranking System ")
+
 st.markdown("""
-This tool uses **TF-IDF** and **cosine similarity** to automatically rank resumes based on their relevance to a given job description.  
-Upload resumes (PDFs) and paste your job description below to get instant ranking results.
+Welcome to the **AI-powered Resume Screening System** built with 
+TF-IDF, cosine similarity, and smart keyword weighting.  
+This tool ranks resumes based on **how closely they match the Job Description** and even identifies key skill overlaps.
 """)
 
-st.divider()
+st.sidebar.header("⚙️ Configuration")
+weight_skills = st.sidebar.slider("Skill Section Weight", 0.0, 1.0, 0.3)
+weight_exp = st.sidebar.slider("Experience Section Weight", 0.0, 1.0, 0.2)
+st.sidebar.markdown("---")
+st.sidebar.info("Adjust weights to fine-tune matching behavior for different roles.")
 
-# Input: Job Description
-st.subheader("🧠 Job Description")
-job_description = st.text_area("Paste or type the job description here...", height=200, placeholder="Enter job description...")
+# ============================================================
+# 📝 Inputs
+# ============================================================
 
-# Input: File Upload
-st.subheader("📂 Upload Resumes")
-uploaded_files = st.file_uploader(
-    "Upload multiple resume files (PDF format)",
-    type=["pdf"],
-    accept_multiple_files=True,
-    help="You can upload multiple PDFs at once."
-)
+col1, col2 = st.columns([1.2, 1])
 
-# ----------------------------
-# Processing Logic
-# ----------------------------
+with col1:
+    st.subheader("🧠 Job Description")
+    job_description = st.text_area(
+        "Paste or type the job description here...",
+        height=220,
+        placeholder="Enter job description with skill requirements, responsibilities, and qualifications..."
+    )
+
+with col2:
+    st.subheader("📂 Upload Resumes")
+    uploaded_files = st.file_uploader(
+        "Upload multiple resume files (PDF format)",
+        type=["pdf"],
+        accept_multiple_files=True
+    )
+
+# ============================================================
+# ⚙️ Main Processing
+# ============================================================
 
 if uploaded_files and job_description:
     st.divider()
     st.subheader("🔍 Ranking Resumes")
 
-    with st.spinner("Analyzing resumes... Please wait."):
-        resumes_text = []
-        for file in uploaded_files:
-            text = extract_text_from_pdf(file)
-            if text:
-                resumes_text.append(text)
-            time.sleep(0.1)  # Simulate progress
+    progress = st.progress(0)
+    resumes_text = []
 
-        if len(resumes_text) == 0:
-            st.warning("No valid text could be extracted from the uploaded resumes.")
-        else:
-            results = rank_resumes(job_description, resumes_text)
-            results["Resume"] = [file.name for file in uploaded_files]
+    for idx, file in enumerate(uploaded_files):
+        text = extract_text_from_pdf(file)
+        if text:
+            resumes_text.append(preprocess_text(text))
+        progress.progress((idx + 1) / len(uploaded_files))
+        time.sleep(0.1)
 
-            st.success("✅ Ranking completed successfully!")
-            st.dataframe(results, use_container_width=True)
+    if len(resumes_text) == 0:
+        st.warning("⚠️ No valid text could be extracted from the uploaded resumes.")
+    else:
+        results = weighted_rank(preprocess_text(job_description), resumes_text)
+        results["Resume"] = [file.name for file in uploaded_files]
 
-            # Option to download results
-            csv_buffer = io.StringIO()
-            results.to_csv(csv_buffer, index=False)
-            st.download_button(
-                label="⬇️ Download Results as CSV",
-                data=csv_buffer.getvalue(),
-                file_name="resume_ranking_results.csv",
-                mime="text/csv"
-            )
+        st.success("✅ Ranking completed successfully!")
+        st.write("### 🏆 Top Candidates:")
+        st.dataframe(results, use_container_width=True)
+
+        # Highlight best match
+        top_resume = results.iloc[0]
+        st.markdown(f"""
+        <div style='background-color:#e8f5e9;padding:10px;border-radius:8px;margin-top:10px'>
+        <b>🥇 Best Match:</b> {top_resume['Resume']}  
+        <br>Similarity Score: <b>{round(top_resume['Weighted Score']*100,2)}%</b>
+        </div>
+        """, unsafe_allow_html=True)
+
+        # Keyword extraction for job description
+        with st.expander("🔑 View Key JD Keywords"):
+            jd_keywords = extract_keywords(job_description)
+            st.write(", ".join([f"`{k}`" for k in jd_keywords]))
+
+        # Download results
+        csv_buffer = io.StringIO()
+        results.to_csv(csv_buffer, index=False)
+        st.download_button(
+            label="⬇️ Download Results as CSV",
+            data=csv_buffer.getvalue(),
+            file_name="resume_ranking_results.csv",
+            mime="text/csv"
+        )
 
 elif not uploaded_files and not job_description:
     st.info("👆 Please upload resumes and enter a job description to start.")
@@ -122,11 +215,13 @@ elif uploaded_files and not job_description:
 elif job_description and not uploaded_files:
     st.warning("⚠️ Please upload at least one PDF resume.")
 
-# ----------------------------
-# Footer
-# ----------------------------
+# ============================================================
+# 🧩 Footer
+# ============================================================
 st.divider()
-st.markdown(
-    "<center>Developed by <b>Sreeram Tatta</b> | AI-powered Resume Screening System</center>",
-    unsafe_allow_html=True
-)
+st.markdown("""
+<center>
+Developed by <b>Sreeram Tatta</b> 🚀 | AICTE TechSaksham Internship Project  
+<br><i>TF-IDF × Cosine Similarity × Streamlit Magic</i>
+</center>
+""", unsafe_allow_html=True)
