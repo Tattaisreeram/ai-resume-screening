@@ -4,9 +4,7 @@ An **AI-powered resume screening web application** built with **Streamlit**, lev
 🚀 **Live Demo:** [Click here to open the app](https://ai-resume-screening-g83kj4zxee627rfhrbapox.streamlit.app/)
 
 <p align="center">
-  <a href="https://ai-resume-screening-g83kj4zxee627rfhrbapox.streamlit.app/" target="_blank">
-    <img src="https://img.shields.io/badge/🚀_Live%20App-Streamlit-brightgreen?style=for-the-badge" alt="Streamlit App">
-  </a>
+  <img src="https://github.com/user-attachments/assets/60dfbbc2-aedd-400f-98ca-294ac713b2fd" alt="App Screenshot" width="900"/>
 </p>
 ![App Screenshot](https://github.com/user-attachments/assets/60dfbbc2-aedd-400f-98ca-294ac713b2fd)
 
